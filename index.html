@@ -516,8 +516,10 @@
     }
   </style>
 
-  <!-- ═══════════════════════════════════════════
+ <!-- ═══════════════════════════════════════════
        CXone Chat + Guide Widget
+       BU: 5748  |  Channel: Members Booking Engine
+       Bot: MBE Bot  |  agentId: 69480059
   ════════════════════════════════════════════ -->
   <script>
     (function(n, u) {
@@ -532,7 +534,7 @@
       document.head.appendChild(e);
     })("cxone", "https://web-modules-de-na1.niceincontact.com/loader/1/loader.js");
 
-    cxone("init", "5748"); // ← replace with target BU
+    cxone("init", "5748");
     cxone("guide", "init");
 
     // ── Prefill member contact fields ──
@@ -548,9 +550,44 @@
     cxone("guide", "setDesiredGuideHeight", "600px");
     cxone("guide", "setButtonSize", "70px");
 
-    // ── Custom chat header branding ──
-    setTimeout(() => {
+    // ── Bot/agent reply box toggle ──────────────────────────────────────────
+    // Required: must be called before onAnyPushUpdate to activate the push stream.
+    cxone("chat", "setAllowedExternalMessageTypes", [
+      "MESSAGE_SENT",
+      "MESSAGE_RECEIVED",
+    ]);
+
+    // Use the agentId shown in CXone UserHub → ACD → Users (search "bot").
+    // Do NOT use payload.data.inboxAssignee.id — that is an internal system ID
+    // not visible anywhere in the UI.
+    var BOT_USER_ID = 69480059; // MBE Bot
+    var isBotMode = false;
+
+    // ⚠️ Single source of truth for ALL chat widget CSS.
+    // setCustomCss is a full override — every call replaces everything previously
+    // applied. Never add a standalone setCustomCss call elsewhere or it will wipe
+    // out the branding and reply box logic set here.
+    function applyAllChatCss(botMode) {
+      var replyBoxCss = botMode
+        ? `
+            [data-selector="REPLY_BOX"],
+            [data-selector="TEXTAREA"],
+            [data-selector="INPUT"],
+            [data-selector="SEND_BUTTON"] {
+                display: none !important;
+            }
+          `
+        : `
+            [data-selector="REPLY_BOX"],
+            [data-selector="TEXTAREA"],
+            [data-selector="INPUT"],
+            [data-selector="SEND_BUTTON"] {
+                display: revert !important;
+            }
+          `;
+
       cxone("chat", "setCustomCss", `
+        /* ── Branding ── */
         [data-selector="HEADER"] {
           background-image: url("https://images.contentstack.io/v3/assets/blt440de00c5519ec3c/blt5b2b17a4f2e5789b/logo-vidanta.svg") !important;
           background-repeat: no-repeat !important;
@@ -563,12 +600,52 @@
           border: 1px solid #2C1A0E !important;
           color: #C4714A !important;
         }
+
+        /* ── Reply box (bot vs. agent) ── */
+        ${replyBoxCss}
       `);
-    }, 1000);
+    }
+
+    // Apply full CSS on load — reply box visible, bot mode off
+    setTimeout(function() { applyAllChatCss(false); }, 1000);
+
+    // Re-apply full CSS on every assignee change with updated bot state
+    cxone("chat", "onAnyPushUpdate", function(payload) {
+
+      // ── BOT ID DISCOVERY LOGGING ─────────────────────────────────────────
+      // Activate by adding ?cxdebug to the page URL. Safe to leave in production.
+      var CX_DEBUG = window.location.search.includes('cxdebug');
+      if (CX_DEBUG && payload?.eventType === "CaseInboxAssigneeChanged") {
+        var _user = payload?.data?.case?.inboxAssigneeUser;
+        console.group("[CXone] CaseInboxAssigneeChanged");
+        console.log("agentId (UserHub-visible):   ", payload?.data?.inboxAssignee?.agentId);
+        console.log("inboxAssigneeUser.isBotUser: ", _user?.isBotUser);
+        console.log("inboxAssigneeUser.firstName: ", _user?.firstName);
+        console.log("loginUsername:               ", payload?.data?.inboxAssignee?.loginUsername);
+        console.log("nickname:                    ", payload?.data?.inboxAssignee?.nickname);
+        console.log("── Full payload ──");
+        console.log(JSON.parse(JSON.stringify(payload)));
+        console.groupEnd();
+      }
+      // ── END LOGGING ───────────────────────────────────────────────────────
+
+      if (payload?.eventType !== "CaseInboxAssigneeChanged") return;
+
+      var assigneeUser = payload?.data?.case?.inboxAssigneeUser;
+      var agentId      = payload?.data?.inboxAssignee?.agentId;
+
+      var botMode =
+        assigneeUser?.isBotUser === true || // primary: reliable flag in payload
+        agentId === BOT_USER_ID;            // fallback: UserHub-visible agentId
+
+      if (botMode === isBotMode) return; // no change, skip re-render
+      isBotMode = botMode;
+      applyAllChatCss(isBotMode);
+    });
 
     // ── Focus outline fix (accessibility) ──
-    setTimeout(() => {
-      const s = document.createElement("style");
+    setTimeout(function() {
+      var s = document.createElement("style");
       s.innerHTML = `
         #cxone-guide-container [data-selector="GUIDE_CHANNEL_BUTTON"]:focus,
         #cxone-guide-container [data-selector="GUIDE_CHANNEL_BUTTON"]:focus-visible {
